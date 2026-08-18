@@ -1,0 +1,14 @@
+# Streamlit & Python files
+.streamlit/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local Database files
+*.db
+*.sqlite3
+
+# OS generated files
+.DS_Store
+Thumbs.db
