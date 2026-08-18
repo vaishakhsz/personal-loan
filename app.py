@@ -391,6 +391,7 @@ main_menu = [
     "💰 Personal Loan Management",
     "📄 Loan Agreement (Malayalam)",
     "📅 EMI Schedule",
+    "⚖️ Trial Balance",
     "💾 Backup, Restore & Upload"
 ]
 choice = st.sidebar.selectbox("Select Module", main_menu)
@@ -936,6 +937,102 @@ elif choice == "📅 EMI Schedule":
         """
         
         st.download_button(label="📥 ഡൗൺലോഡ് & പ്രിന്റ് ഷെഡ്യൂൾ (Download Schedule Sheet)", data=printable_schedule_html, file_name=f"EMI_Schedule_Loan_{selected_sched}.html", mime="text/html")
+
+# ==========================================
+# MODULE: TRIAL BALANCE
+# ==========================================
+elif choice == "⚖️ Trial Balance":
+    st.header("⚖️ Double-Entry System Trial Balance")
+    st.markdown("This statement verifies that total debits match total credits in the database ledgers.")
+    
+    if loans_df.empty:
+        st.info("No financial accounts exist to generate a Trial Balance.")
+    else:
+        # Fees
+        total_proc_fees = loans_df['processing_fee'].astype(float).sum() if 'processing_fee' in loans_df.columns else 0.0
+        total_admin_fees = loans_df['admin_fee'].astype(float).sum() if 'admin_fee' in loans_df.columns else 0.0
+        total_doc_fees = loans_df['documentation_fee'].astype(float).sum() if 'documentation_fee' in loans_df.columns else 0.0
+        total_fees = total_proc_fees + total_admin_fees + total_doc_fees
+        
+        # Disbursements & Repayments from ledger
+        total_disbursed = 0.0
+        total_principal_repaid = 0.0
+        total_interest_repaid = 0.0
+        
+        if not ledger_df.empty:
+            total_disbursed = ledger_df[ledger_df['transaction_type'] == 'Disbursement']['amount'].astype(float).sum()
+            total_principal_repaid = ledger_df[ledger_df['transaction_type'] == 'Repayment']['amount'].astype(float).sum()
+            total_interest_repaid = ledger_df[ledger_df['transaction_type'] == 'Interest Settlement']['amount'].astype(float).sum()
+            
+        # Interest Charged from loans
+        total_interest_charged = loans_df['interest_amount'].astype(float).sum() if 'interest_amount' in loans_df.columns else 0.0
+        total_principal_issued = loans_df['principal'].astype(float).sum() if 'principal' in loans_df.columns else 0.0
+        
+        # Calculations
+        cash_inflows = total_principal_repaid + total_interest_repaid + total_fees
+        cash_outflows = total_disbursed
+        net_cash = cash_inflows - cash_outflows
+        
+        cash_dr = net_cash if net_cash >= 0 else 0.0
+        cash_cr = abs(net_cash) if net_cash < 0 else 0.0
+        
+        net_receivables = total_principal_issued - total_principal_repaid
+        receivables_dr = net_receivables if net_receivables >= 0 else 0.0
+        receivables_cr = abs(net_receivables) if net_receivables < 0 else 0.0
+        
+        net_interest_receivables = total_interest_charged - total_interest_repaid
+        int_receivables_dr = net_interest_receivables if net_interest_receivables >= 0 else 0.0
+        int_receivables_cr = abs(net_interest_receivables) if net_interest_receivables < 0 else 0.0
+        
+        interest_income_cr = total_interest_charged
+        fee_income_cr = total_fees
+        
+        # Build Table
+        tb_data = []
+        tb_data.append({
+            "Code": "1001",
+            "Account Name": "Cash & Bank Account",
+            "Debit (DR)": f"₹{cash_dr:,.2f}" if cash_dr > 0 or cash_cr == 0 else "",
+            "Credit (CR)": f"₹{cash_cr:,.2f}" if cash_cr > 0 else ""
+        })
+        tb_data.append({
+            "Code": "1002",
+            "Account Name": "Loan Principal Receivables (Asset)",
+            "Debit (DR)": f"₹{receivables_dr:,.2f}" if receivables_dr > 0 or receivables_cr == 0 else "",
+            "Credit (CR)": f"₹{receivables_cr:,.2f}" if receivables_cr > 0 else ""
+        })
+        tb_data.append({
+            "Code": "1003",
+            "Account Name": "Loan Interest Receivables (Asset)",
+            "Debit (DR)": f"₹{int_receivables_dr:,.2f}" if int_receivables_dr > 0 or int_receivables_cr == 0 else "",
+            "Credit (CR)": f"₹{int_receivables_cr:,.2f}" if int_receivables_cr > 0 else ""
+        })
+        tb_data.append({
+            "Code": "3001",
+            "Account Name": "Interest Revenue (Income)",
+            "Debit (DR)": "",
+            "Credit (CR)": f"₹{interest_income_cr:,.2f}"
+        })
+        tb_data.append({
+            "Code": "3002",
+            "Account Name": "Service Fees Collected (Income)",
+            "Debit (DR)": "",
+            "Credit (CR)": f"₹{fee_income_cr:,.2f}"
+        })
+        
+        total_dr = cash_dr + receivables_dr + int_receivables_dr
+        total_cr = cash_cr + receivables_cr + int_receivables_cr + interest_income_cr + fee_income_cr
+        
+        st.dataframe(pd.DataFrame(tb_data), use_container_width=True, hide_index=True)
+        
+        col_dr, col_cr = st.columns(2)
+        col_dr.metric("Total Debits (DR)", f"₹{total_dr:,.2f}")
+        col_cr.metric("Total Credits (CR)", f"₹{total_cr:,.2f}")
+        
+        if abs(total_dr - total_cr) < 0.01:
+            st.success("🟢 **Trial Balance is in Balance.** Total Debits match Total Credits perfectly.")
+        else:
+            st.error(f"🔴 **Out of Balance Warning:** Difference is ₹{abs(total_dr - total_cr):,.2f}")
 
 # ==========================================
 # MODULE: BACKUP, RESTORE & DATA UPLOADER
