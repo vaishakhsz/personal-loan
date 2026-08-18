@@ -736,27 +736,60 @@ elif choice == "💰 Personal Loan Management":
                 if live_outstanding_balance <= 0.0:
                     st.success("🎉 Already Repaid / Bill completely paid in full.")
                 else:
-                    with st.form("repayment_ledger_post_form"):
-                        repay_amt = st.number_input("Repayment Collected (₹)", min_value=0.0, max_value=live_outstanding_balance, step=100.0, help="Cannot exceed remaining outstanding debt limit.")
-                        repay_date = st.date_input("Settlement Date")
-                        type_tx = st.selectbox("Allocation Type", ["Repayment", "Interest Settlement"])
-                        
-                        if st.form_submit_button("Post Entry"):
-                            if repay_amt > 0:
-                                ledger_record = {
+                    # Calculate outstanding principal and interest
+                    total_principal_repaid_so_far = loan_ledger[loan_ledger['transaction_type'] == 'Repayment']['amount'].astype(float).sum() if not loan_ledger.empty else 0.0
+                    outstanding_principal = max(0.0, principal - total_principal_repaid_so_far)
+                    
+                    total_interest_charged = float(loan_row_data['interest_amount'])
+                    total_interest_repaid_so_far = loan_ledger[loan_ledger['transaction_type'] == 'Interest Settlement']['amount'].astype(float).sum() if not loan_ledger.empty else 0.0
+                    outstanding_interest = max(0.0, total_interest_charged - total_interest_repaid_so_far)
+                    
+                    # Separate inputs without st.form for live updates
+                    principal_repay_input = st.number_input(f"Principal Repayment (Outstanding: ₹{outstanding_principal:,.2f})", min_value=0.0, max_value=outstanding_principal, value=0.0, step=100.0)
+                    interest_settled_input = st.number_input(f"Interest Settlement (Outstanding: ₹{outstanding_interest:,.2f})", min_value=0.0, max_value=outstanding_interest, value=0.0, step=100.0)
+                    repay_date = st.date_input("Settlement Date")
+                    
+                    total_collection = principal_repay_input + interest_settled_input
+                    st.info(f"💵 Total Collection Amount to Post: **₹{total_collection:,.2f}**")
+                    
+                    if st.button("Post Ledger Entry"):
+                        if total_collection <= 0:
+                            st.error("Please enter an amount greater than zero.")
+                        else:
+                            success = False
+                            created_at = str(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                            
+                            if principal_repay_input > 0:
+                                ledger_record_p = {
                                     'loan_id': selected_loan,
-                                    'transaction_type': type_tx,
-                                    'amount': repay_amt,
+                                    'transaction_type': 'Repayment',
+                                    'amount': principal_repay_input,
                                     'transaction_date': str(repay_date),
-                                    'created_at': str(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                                    'created_at': created_at
                                 }
-                                if insert_record('ledger', ledger_record):
-                                    # Check if this installment covers the remaining balance
-                                    if repay_amt >= live_outstanding_balance:
-                                        update_record('loans', selected_loan, {'status': 'Closed'})
-                                    
-                                    st.success("Repayment entry successfully posted inside local ledger.")
-                                    st.rerun()
+                                success = insert_record('ledger', ledger_record_p) is not None
+                                
+                            if interest_settled_input > 0:
+                                ledger_record_i = {
+                                    'loan_id': selected_loan,
+                                    'transaction_type': 'Interest Settlement',
+                                    'amount': interest_settled_input,
+                                    'transaction_date': str(repay_date),
+                                    'created_at': created_at
+                                }
+                                success = insert_record('ledger', ledger_record_i) is not None or success
+                                
+                            if success:
+                                # Re-fetch updated ledger data to check closed status
+                                new_ledger = get_table_data('ledger')
+                                updated_loan_ledger = new_ledger[new_ledger['loan_id'] == selected_loan] if not new_ledger.empty else pd.DataFrame()
+                                total_repaid_credits = updated_loan_ledger[updated_loan_ledger['transaction_type'].isin(['Repayment', 'Interest Settlement'])]['amount'].astype(float).sum() if not updated_loan_ledger.empty else 0.0
+                                
+                                if total_repaid_credits >= total_liability:
+                                    update_record('loans', selected_loan, {'status': 'Closed'})
+                                
+                                st.success("Ledger entry successfully posted inside local ledger.")
+                                st.rerun()
                             
             with tab_view:
                 col_m1, col_m2, col_m3 = st.columns(3)
